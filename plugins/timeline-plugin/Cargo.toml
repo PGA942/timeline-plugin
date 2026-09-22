@@ -1,0 +1,12 @@
+[package]
+name = "timeline-plugin"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "本文/表示名/ハンドルを Unicode コードポイント順で並べるソートノード"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rasq-plugin-kit = { path = "../../kit" }

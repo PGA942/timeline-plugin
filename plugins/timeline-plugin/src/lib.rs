@@ -1,12 +1,14 @@
-//! timeline-plugin — カスタム TL(`tl`)= アルゴリズムノードのサンプル(契約 v0.2)。
+//! timeline-plugin — カスタム TL(`tl`)= アルゴリズムノードのサンプル(契約 v0.13、docs/slots.md §2.6)。
 //!
 //! 「Unicode 順」ソートノードを 1 つ提供する。並び順(昇順/降順)と並べ替えのキー(本文/表示名/ハンドル)は
 //! `tl.params` が返す RRL 設定ページでユーザーが決め、ホストがノードのパラメーターとして保存し、
 //! `tl.sort` の `params` で渡してくる。データ取得はホストの仕事で、このプラグインは
 //! 宣言(`tl.timelines`)・設定ページ(`tl.params`)・並べ替え(`tl.sort`)だけ。
-use rasq_plugin_kit::{err, manifest, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+//!
+//! `plugin.manifest` の答えは同じディレクトリの `manifest.json` そのもの(`include_str!`。
+//! `rasq check` の往復検査が常に一致する)。
+use rasq_plugin_kit::{err, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
 
-const ID: &str = "sample.timeline";
 const TL_UNICODE: &str = "unicode-asc";
 
 /// パラメーター名(= RRL ノードの key、`$.settings.<key>` の key)。
@@ -15,21 +17,18 @@ const PARAM_KEY: &str = "key";
 const DEFAULT_ORDER: &str = "asc";
 const DEFAULT_KEY: &str = "body";
 
+/// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限はあちらを直す)。
+fn manifest() -> Value {
+    rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json")
+}
+
 fn root() -> Value {
     rrl::column("root", vec![rrl::text("desc", "カスタム TL サンプル: 本文/表示名/ハンドルを Unicode 順に並べるソートノード「Unicode 順」")])
 }
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
     match fn_name {
-        "plugin.manifest" => Ok(manifest(
-            ID,
-            "Unicode 順ソート(サンプル)",
-            "0.2.0",
-            "view",
-            "本文/表示名/ハンドルを Unicode コードポイント順で並べるソートノード",
-            &["tl"],
-            &[],
-        )),
+        "plugin.manifest" => Ok(manifest()),
         "lifecycle" => Ok(json!({})),
         "tl.timelines" => Ok(json!({
             "timelines": [{"id": TL_UNICODE, "label": "Unicode 順", "base": "home"}]
@@ -59,7 +58,7 @@ fn section_header(key: &str, title: &str) -> Value {
     rrl::node("SectionHeader", key, json!({"title": title}), vec![])
 }
 
-/// 1 つのラジオ。`k` = パラメーター名(同じグループの全ラジオが同じ key)、`value` = 選択肢、`group` = Bind。
+/// 1 つのラジオ。`param` = パラメーター名(同じグループの全ラジオが同じ key)、`value` = 選択肢、`group` = Bind。
 fn radio(param: &str, title: &str, value: &str) -> Value {
     let mut n = rrl::node(
         "RadioListTile",
@@ -167,6 +166,14 @@ mod tests {
                 find_nodes(ch, t, out);
             }
         }
+    }
+
+    /// `plugin.manifest` は `manifest.json` そのもの(`rasq check` の往復検査と同じ突き合わせ)。
+    #[test]
+    fn manifest_matches_manifest_json() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let file: Value = rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).unwrap();
+        assert_eq!(m, file);
     }
 
     #[test]
