@@ -1,4 +1,4 @@
-# timeline-plugin — Unicode 順ソートノード(`tl`、契約 v0.2)
+# timeline-plugin — Unicode 順ソートノード(スロット `tl`)
 
 簡略カスタマイズ UI / ノードグラフに **「Unicode 順」でソート** するアルゴリズムノードを 1 つ足すサンプル。
 投稿を **Unicode コードポイント順**に並べ替える(数字 → 英字 → ひらがな → カタカナ → 漢字 → 絵文字の順)。
@@ -8,15 +8,37 @@
 
 データ取得はホストの仕事で、このプラグインは **宣言・設定ページ・並べ替え**だけ。
 
-## 契約(CONTRACT.md §2.6)
+## このリポジトリの形(`rasq` ワークスペース)
+
+`rasq-sdk-sample` の `docs/cli.md` §2 のワークスペース。`rasq init` / `rasq new tl` が作る形に合わせてある。
+
+```
+rasq.toml                                # schema = "rasq.workspace/1"、[[plugins]] に name/slot/id
+Cargo.toml                               # [workspace](rasq CLI が rasq.toml から作り直す)
+kit/                                     # rasq-plugin-kit の写し(正典は SDK の rust/rasq-plugin-kit、D-244i)
+plugins/timeline-plugin/
+  manifest.json                          # plugin.manifest の答えそのもの
+  src/lib.rs                             # manifest.json を include_str! で返し、tl.* を実装
+dist/                                    # rasq build --raw の出力(.rasqpkg と生の .wasm)
+```
+
+- 契約の正典は [`CONTRACT.md`](CONTRACT.md) が指す `rasq-sdk-sample/docs/slots.md` §2.6。
+- マニフェストは `plugins/timeline-plugin/manifest.json` の 1 か所だけ。`src/lib.rs` は `include_str!` で
+  そのまま返すので、`rasq check` の往復検査(wasm の `plugin.manifest` == `manifest.json`)が常に一致する。
+  名前 / 版 / 説明 / 権限を変えるときは `manifest.json` を直す。
+
+## 契約(`docs/slots.md` §2.6)
 
 | fn | args | 戻り |
 |---|---|---|
-| `plugin.manifest` | `{}` | `{id: "sample.timeline", kind: "view", slots: ["tl"], permissions: []}` |
+| `plugin.manifest` | `{}` | `manifest.json`(`{id: "sample.timeline", kind: "view", slots: ["tl"], permissions: []}`) |
+| `lifecycle` | `{kind, surface?}` | `{}` |
 | `tl.timelines` | `{}` | `{timelines: [{id: "unicode-asc", label: "Unicode 順", base: "home"}]}`(`base` は互換用) |
 | `tl.params` | `{id: "unicode-asc"}` | `{root: RRL Column, defaults: {order: "asc", key: "body"}}` |
 | `tl.sort` | `{id, posts: [Post ワイヤ], params?}` | `{order: [postId…]}`(`id` 無しの投稿は除外) |
 | `tl.params` / `tl.sort`(未知の `id`)/ `tl.customize` / その他 | | `C01` |
+
+ホスト関数は使わない(`permissions: []`)。
 
 ### パラメーター(`tl.params` の設定ページ)
 
@@ -32,26 +54,41 @@
 `tl.sort` の `params` は保存されたパラメーター(無ければホストが `defaults` を渡す)。`params` 自体が無い /
 未知の値なら `asc` / `body` として扱う。キーが取れない投稿(`author` 無しなど)は空文字として並ぶ。
 
-## ビルド / テスト
+## ビルドと確認
+
+`rasq` CLI は `rasq-sdk-sample` から組む(`cd rust && cargo build --release -p rasq-cli`)。
 
 ```sh
-cargo test -p timeline-plugin
-cargo build --release --target wasm32-unknown-unknown -p timeline-plugin
-# → target/wasm32-unknown-unknown/release/timeline_plugin.wasm(./build.sh なら dist/)
+rasq check                 # wasm32 ビルド → export 検査 → manifest 往復 → スキーマ / 登録簿 → cargo test
+rasq test                  # cargo test だけ
+rasq build --raw           # dist/sample.timeline-0.2.0.rasqpkg と dist/timeline_plugin.wasm
+rasq inspect dist/sample.timeline-0.2.0.rasqpkg
 ```
 
-## 端末での確認(rasq-client)
+`cargo test` は native で走るので、wasm でだけ起きる問題(時刻 / 乱数 / スレッド、`docs/cli.md` §5 の落とし穴)は
+**ビルド済みの wasm をそのまま叩く** `rasq call` で確かめる:
 
-1. サイドバー → **WASMプラグイン試験 (dev)** → `.wasm のパスからインポート` に `timeline_plugin.wasm` の絶対パス → **読み込み**。
-2. **スロットに登録**(権限は無し)。
-3. 簡略カスタマイズ UI / ノードグラフのアルゴリズム部品に **「Unicode 順でソート」** が増える。
-4. **ノードを設定** を開くと「並び順」「並べ替えのキー」のラジオが出る。降順 + 表示名にすると、
+```sh
+rasq call timeline-plugin plugin.manifest
+rasq call timeline-plugin tl.timelines
+rasq call timeline-plugin tl.sort --args '{"id":"unicode-asc","params":{"order":"desc","key":"name"},
+  "posts":[{"id":"p1","body":"う","author":{"displayName":"さくら","handle":"@zed"}},
+           {"id":"p2","body":"あ","author":{"displayName":"たろう","handle":"@amy"}},
+           {"id":"p3","body":"い","author":{"displayName":"Alice","handle":"@mia"}}]}'
+# → {"order": ["p2", "p1", "p3"]}
+```
+
+## 端末での試し方(rasq-client)
+
+1. `rasq dev` が出す絶対パス(または `dist/timeline_plugin.wasm` の絶対パス)を控える。
+2. サイドバー → **WASMプラグイン試験 (dev)** → `.wasm のパスからインポート` に貼って **読み込み**。
+3. **スロットに登録**(権限は無し)。
+4. 簡略カスタマイズ UI / ノードグラフのアルゴリズム部品に **「Unicode 順でソート」** が増える。
+5. **ノードを設定** を開くと「並び順」「並べ替えのキー」のラジオが出る。降順 + 表示名にすると、
    投稿が表示名の Unicode 降順(絵文字 → 漢字 → かな → 英数字)に並んでいれば OK。
 
----
+## 掲載(審査)に出す
 
-## このリポジトリの形
-
-- クレートはルート(`src/`)、共通部品 [`rasq-plugin-kit`](kit) は `kit/` に同梱(開発用モノレポから写している)。
-- 契約は [`CONTRACT.md`](CONTRACT.md)(スロットプラグイン契約 v0.1)。
-- ビルド済み `.wasm` は [`dist/`](dist)。`cargo build --release --target wasm32-unknown-unknown` で更新。
+`rasq build` が出す `dist/sample.timeline-0.2.0.rasqpkg` がそのまま掲載できる形
+(zstd tar + `bundle.json` `rasq.bundle/1` + `SHA512SUMS`)。`rasq publish --central <url> --dry-run` で
+Central への 3 要求を書き出せる。開発者鍵の署名(`*.sig.json`)はサイドロード用で、リポジトリには入れない。
