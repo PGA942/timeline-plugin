@@ -7,7 +7,10 @@
 //!
 //! `plugin.manifest` の答えは同じディレクトリの `manifest.json` そのもの(`include_str!`。
 //! `rasq check` の往復検査が常に一致する)。
-use rasq_plugin_kit::{err, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+use rasq_plugin_kit::{err, i18n, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+
+mod text;
+use text::TEXT;
 
 const TL_UNICODE: &str = "unicode-asc";
 
@@ -23,7 +26,7 @@ fn manifest() -> Value {
 }
 
 fn root() -> Value {
-    rrl::column("root", vec![rrl::text("desc", "カスタム TL サンプル: 本文/表示名/ハンドルを Unicode 順に並べるソートノード「Unicode 順」")])
+    rrl::column("root", vec![rrl::text("desc", TEXT.t(&i18n::current(), "root.desc"))])
 }
 
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
@@ -31,7 +34,7 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
         "plugin.manifest" => Ok(manifest()),
         "lifecycle" => Ok(json!({})),
         "tl.timelines" => Ok(json!({
-            "timelines": [{"id": TL_UNICODE, "label": "Unicode 順", "base": "home"}]
+            "timelines": [{"id": TL_UNICODE, "label": TEXT.t(i18n::locale_of(&args), "timeline.unicode"), "base": "home"}]
         })),
         "tl.params" => params(&args),
         "tl.sort" => sort(&args),
@@ -72,16 +75,18 @@ fn radio(param: &str, title: &str, value: &str) -> Value {
 
 fn params(args: &Value) -> Result<Value, Value> {
     check_id(args)?;
+    let loc = i18n::locale_of(args);
+    let t = |key: &'static str| TEXT.t(loc, key);
     let root = rrl::column(
         "params",
         vec![
-            section_header("order_header", "並び順"),
-            radio(PARAM_ORDER, "昇順", "asc"),
-            radio(PARAM_ORDER, "降順", "desc"),
-            section_header("key_header", "並べ替えのキー"),
-            radio(PARAM_KEY, "本文", "body"),
-            radio(PARAM_KEY, "表示名", "name"),
-            radio(PARAM_KEY, "ハンドル", "handle"),
+            section_header("order_header", t("params.order")),
+            radio(PARAM_ORDER, t("params.order.asc"), "asc"),
+            radio(PARAM_ORDER, t("params.order.desc"), "desc"),
+            section_header("key_header", t("params.key")),
+            radio(PARAM_KEY, t("params.key.body"), "body"),
+            radio(PARAM_KEY, t("params.key.name"), "name"),
+            radio(PARAM_KEY, t("params.key.handle"), "handle"),
         ],
     );
     Ok(json!({
@@ -226,6 +231,41 @@ mod tests {
         // 未知の id は C01
         assert_eq!(call_native("tl.params", json!({"id": "nope"})).unwrap_err()["code"], json!("C01"));
         assert_eq!(call_native("tl.params", json!({})).unwrap_err()["code"], json!("C01"));
+    }
+
+    /// 設定ページと TL の名前は `args.locale` の言語(無ければ日本語)。
+    #[test]
+    fn texts_follow_locale() {
+        let _ = i18n::take_misses();
+        let t = call_native("tl.timelines", json!({"locale": "en"})).unwrap();
+        assert_eq!(t["timelines"][0]["label"], "Unicode order");
+        let t = call_native("tl.timelines", json!({"locale": "ko-KR"})).unwrap();
+        assert_eq!(t["timelines"][0]["label"], "Unicode 순");
+        let p = call_native("tl.params", json!({"id": "unicode-asc", "locale": "zh-Hant"})).unwrap();
+        let mut headers = vec![];
+        find_nodes(&p["root"], "SectionHeader", &mut headers);
+        let titles: Vec<&Value> = headers.iter().map(|h| &h["p"]["title"]).collect();
+        assert_eq!(titles, [&json!("排序方式"), &json!("排序依據")]);
+        let mut radios = vec![];
+        find_nodes(&p["root"], "RadioListTile", &mut radios);
+        let titles: Vec<&str> = radios.iter().map(|r| r["p"]["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, ["遞增", "遞減", "內文", "顯示名稱", "使用者名稱"]);
+        let p = call_native("tl.params", json!({"id": "unicode-asc", "locale": "zh-Hans"})).unwrap();
+        assert_eq!(p["root"]["c"][0]["p"]["title"], "排序方式");
+        assert_eq!(p["root"]["c"][1]["p"]["title"], "升序");
+        // locale が無ければ日本語
+        let t = call_native("tl.timelines", json!({})).unwrap();
+        assert_eq!(t["timelines"][0]["label"], "Unicode 順");
+        assert!(i18n::take_misses().is_empty());
+    }
+
+    #[test]
+    fn manifest_has_every_locale() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        for tag in ["en", "zh-Hans", "zh-Hant", "ko"] {
+            assert!(m["locales"][tag]["name"].is_string(), "{tag}");
+            assert!(m["locales"][tag]["description"].is_string(), "{tag}");
+        }
     }
 
     #[test]
